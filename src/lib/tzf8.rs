@@ -2,12 +2,13 @@ use std::fmt::{Display, Formatter};
 use std::ptr::write;
 use rand::Rng;
 use rand::seq::SliceRandom;
+use crate::lib::search::TreePolicy;
+use crate::lib::search::tree::{Node, Edge};
 use crate::lib::search_problem::{Observation, SearchProblem};
 use crate::lib::search_problem::HiddenState;
 use crate::lib::Simulator;
 
 struct TwoZeroFourEight {
-
 }
 
 #[derive(Clone)]
@@ -21,13 +22,13 @@ struct Board {
     dropped: bool,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 enum Player {
     Environment,
     Agent
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 enum Action {
     Left,
     Right,
@@ -38,7 +39,6 @@ enum Action {
 }
 
 const ALL_ACTIONS: [Action; 4] = [Action::Left, Action::Right, Action::Up, Action::Down];
-
 
 impl SearchProblem for TwoZeroFourEight {
     type HiddenState = Board;
@@ -68,7 +68,6 @@ impl SearchProblem for TwoZeroFourEight {
         action.clone()
     }
 }
-
 
 impl Observation<Player, Action> for Board {
     fn reward(&self) -> f32 {
@@ -125,7 +124,6 @@ impl HiddenState<Player, Action> for Board {
         self.terminal
     }
 }
-
 
 impl Board {
     fn new() -> Board {
@@ -242,14 +240,14 @@ impl Display for Board {
 struct TwoZeroFourEightSimulator;
 
 impl Simulator<TwoZeroFourEight> for TwoZeroFourEightSimulator {
-    fn simulate(&self, problem: &TwoZeroFourEight, state: &Board, horizon: u32, discount: f32) -> Vec<(Player, f32)> {
+    fn simulate(&self, problem: &TwoZeroFourEight, state: Board, horizon: u32, discount: f32) -> Vec<(Player, f32)> {
 
         assert!(state.dropped, "Environment player cannot be the agent to move");
 
         let mut total_score: f32 = 0.0;
 
         let mut discount_factor = 1.0;
-        let mut current_state = state.clone();
+        let mut current_state = state;
 
         for _ in 0..horizon {
             //println!("{}: \n{}", index, current_state);
@@ -286,12 +284,48 @@ impl Simulator<TwoZeroFourEight> for TwoZeroFourEightSimulator {
     }
 }
 
+struct TwoZeroFourEightTreePolicy {
+
+}
+
+impl<X> TreePolicy<Node<X, Action>, Board, Edge<X, Action>> for TwoZeroFourEightTreePolicy {
+    fn select_edge<'a>(&self, node: &'a Node<X, Action>, hidden_state: &Board) -> &'a Edge<X, Action> {
+        // fully observable, so no legal actions on a node do not change across determinisations
+        match hidden_state.current_actor() {
+            Player::Agent => {
+                let edges = node.edges();
+                let mut max_ucb_score = f32::MIN;
+                let mut best_edge = &edges[0];
+                for edge in edges.iter() {
+                    if edge.is_dangling() {
+                        return edge
+                    }
+                    let target_node_stats = edge.get_target_node().get_statistics_lock();
+                    let expected_reward = edge.get_action_reward().unwrap() + target_node_stats.expected_sample();
+
+                    let score = expected_reward;
+
+                    if score > max_ucb_score {
+                        max_ucb_score = score;
+                        best_edge = edge;
+                    }
+                }
+                best_edge
+            },
+            Player::Environment => {
+                node.edges().choose(&mut rand::thread_rng()).unwrap()
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {
     use crate::lib::Simulator;
     use crate::lib::search_problem::HiddenState;
-    use crate::lib::tzf8::{Action, Board, TwoZeroFourEight, TwoZeroFourEightSimulator};
+    use crate::lib::utils::RandomSimulator;
+    use crate::lib::tzf8::{Action, Board, Player, TwoZeroFourEight, TwoZeroFourEightSimulator, TwoZeroFourEightTreePolicy};
+    use crate::lib::search::mcts::{initialise, MctsConfig, once};
 
     fn board1() -> Board {
         let mut  b = Board::new();
@@ -320,8 +354,29 @@ mod test {
         let sim = TwoZeroFourEightSimulator{};
         let p = TwoZeroFourEight{};
 
-        let result = sim.simulate(&p, &b, 1000, 1.0);
+        let result = sim.simulate(&p, b, 1000, 1.0);
 
         println!("{:?}", result);
+    }
+
+    #[test]
+    fn t3() {
+        let b = board1();
+        let config = MctsConfig {
+            search_problem: TwoZeroFourEight{},
+            players: vec![Player::Environment, Player::Agent],
+            tree_policy: TwoZeroFourEightTreePolicy{},
+            simulator: RandomSimulator{},
+            discount: 1.0,
+            horizon: 20,
+        };
+        let nodes = initialise(&config.search_problem, &b);
+        for _ in 0..10 {
+            let mut arg = vec![];
+            for node in nodes.iter() {
+                arg.push(node)
+            }
+            once(&config, b.clone(), arg);
+        }
     }
 }

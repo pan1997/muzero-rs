@@ -4,9 +4,9 @@
 
 pub trait SearchProblem {
     type HiddenState: HiddenState<Self::Player, Self::Action>;
-    type Action;
+    type Action: Copy + PartialEq;
     type Observation: Observation<Self::Player, Self::Action>;
-    type Player: Copy;
+    type Player: Copy + PartialEq;
 
     fn get_observation<'a>(
         &self,

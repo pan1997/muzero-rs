@@ -1,5 +1,5 @@
-mod tree;
-mod mcts;
+pub(crate) mod tree;
+pub(crate) mod mcts;
 
 enum EdgeLabel<A, B> {
     Action(A),
@@ -7,6 +7,6 @@ enum EdgeLabel<A, B> {
 }
 
 
-trait TreePolicy<N, P, E> {
-    fn select_edge(&self, node: &N, current_player: P) -> &E;
+pub(crate) trait TreePolicy<N, H, E> {
+    fn select_edge<'a>(&self, node: &'a N, hidden_state: &H) -> &'a E;
 }
